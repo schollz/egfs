@@ -2,9 +2,55 @@ package egfs
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"net/http"
 	"os"
+	"os/exec"
 	"time"
 )
+
+func (egfs egfs) Open(name string) (f http.File, err error) {
+	d, err := egfs.Directory()
+	if err != nil {
+		return
+	}
+	for _, f := range d {
+		if f.name == name {
+			return f, nil
+		}
+	}
+	return nil, errors.New("file not found")
+}
+
+func (egfs egfs) Directory() (files []*file, err error) {
+	data, err := egfs.openAndDecryptFile("file")
+	if err != nil {
+		return
+	}
+	var fileNames map[string]interface{}
+	json.Unmarshal(data, fileNames)
+	for name := range fileNames {
+		data, err := egfs.openAndDecryptFile(name)
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.Command("git", "log", "-1", "--format=%cd", "--date=iso8601")
+		cmd.Dir = egfs.absolutePathToRepo
+		jsonTime, err := cmd.Output()
+		if err != nil {
+			return nil, err
+		}
+		var t time.Time
+		json.Unmarshal(jsonTime, t)
+		files = append(files, &file{
+			content: bytes.NewBuffer(data),
+			name:    name,
+			modTime: t,
+		})
+	}
+	return
+}
 
 type file struct {
 	content *bytes.Buffer // actual file contents
